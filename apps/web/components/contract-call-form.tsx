@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Address,
   Contract,
   TransactionBuilder,
   TimeoutInfinite,
@@ -29,7 +30,7 @@ import { signTransaction } from "@stellar/freighter-api";
 import { SavedCallsSheet } from "./saved-calls-sheet";
 import { AbiInputField } from "./abi-input-field";
 import { useAbiStore } from "@/store/useAbiStore";
-import { useEffect } from "react";
+import { Badge } from "@devconsole/ui";
 import { Button } from "@devconsole/ui";
 import { Input } from "@devconsole/ui";
 import {
@@ -77,6 +78,7 @@ export function ContractCallForm({ contractId }: ContractCallFormProps) {
   const [result, setResult] = useState<string | null>(null);
   const [simulationMetrics, setSimulationMetrics] =
     useState<SimulationMetrics | null>(null);
+  const [requiredAuthKeys, setRequiredAuthKeys] = useState<string[]>([]);
   const { saveCall } = useSavedCallsStore();
   const [isSaveOpen, setIsSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
@@ -139,6 +141,43 @@ export function ContractCallForm({ contractId }: ContractCallFormProps) {
     }
   };
 
+  const extractRequiredAuthKeys = (
+    sim: SorobanRpc.Api.SimulateTransactionSuccessResponse,
+  ): string[] => {
+    const entries = sim.result?.auth ?? [];
+    const keys = new Set<string>();
+
+    for (const entry of entries) {
+      try {
+        const credentials = entry.credentials();
+        if (credentials.switch().name !== "sorobanCredentialsAddress") {
+          continue;
+        }
+
+        const authAddress = credentials.address().address();
+        if (authAddress.switch().name !== "scAddressTypeAccount") {
+          continue;
+        }
+
+        const key = Address.fromScAddress(authAddress).toString();
+        if (key.startsWith("G")) {
+          keys.add(key);
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return [...keys];
+  };
+
+  const normalizedConnectedAddress = address?.trim().toUpperCase() ?? null;
+  const isConnectedWalletAuthorized =
+    normalizedConnectedAddress !== null &&
+    requiredAuthKeys.some(
+      (key) => key.toUpperCase() === normalizedConnectedAddress,
+    );
+
   useEffect(() => {
     if (
       contractId ===
@@ -163,6 +202,7 @@ export function ContractCallForm({ contractId }: ContractCallFormProps) {
   const handleFnChange = (name: string) => {
     setFnName(name);
     setSimulationMetrics(null);
+    setRequiredAuthKeys([]);
     if (name === "transfer") {
       setArgs([
         { id: genId(), name: "from", type: "address", value: "" },
@@ -178,16 +218,19 @@ export function ContractCallForm({ contractId }: ContractCallFormProps) {
 
   const addArg = () => {
     setSimulationMetrics(null);
+    setRequiredAuthKeys([]);
     setArgs([...args, { id: genId(), type: "symbol", value: "" }]);
   };
 
   const removeArg = (id: string) => {
     setSimulationMetrics(null);
+    setRequiredAuthKeys([]);
     setArgs(args.filter((a) => a.id !== id));
   };
 
   const updateArg = (id: string, field: keyof ContractArg, val: string) => {
     setSimulationMetrics(null);
+    setRequiredAuthKeys([]);
     setArgs(args.map((a) => (a.id === id ? { ...a, [field]: val } : a)));
   };
 
@@ -195,6 +238,7 @@ export function ContractCallForm({ contractId }: ContractCallFormProps) {
     setIsLoading(true);
     setResult(null);
     setSimulationMetrics(null);
+    setRequiredAuthKeys([]);
     try {
       const network = getActiveNetworkConfig();
       const server = new SorobanRpc.Server(network.rpcUrl);
@@ -227,16 +271,19 @@ export function ContractCallForm({ contractId }: ContractCallFormProps) {
 
       if (SorobanRpc.Api.isSimulationSuccess(sim)) {
         setSimulationMetrics(extractSimulationMetrics(sim));
+        setRequiredAuthKeys(extractRequiredAuthKeys(sim));
         setResult(`Simulation Success! Result XDR available.`);
         toast.success(`Simulation Success!`);
       } else {
         setSimulationMetrics(null);
+        setRequiredAuthKeys([]);
         setResult(`Simulation Failed: ${sim.error || "Unknown error"}`);
         toast.error(`Simulation Failed: ${sim.error || "Unknown error"}`);
       }
     } catch (e: any) {
       console.error(e);
       setSimulationMetrics(null);
+      setRequiredAuthKeys([]);
       setResult(`Error: ${e.message}`);
       toast.error(`Simulation Error: ${e.message}`);
     } finally {
@@ -322,6 +369,7 @@ export function ContractCallForm({ contractId }: ContractCallFormProps) {
   const handleLoad = (call: SavedCall) => {
     setFnName(call.fnName);
     setSimulationMetrics(null);
+    setRequiredAuthKeys([]);
 
     const newArgs = call.args.map((a) => ({ ...a, id: crypto.randomUUID() }));
     setArgs(newArgs);
@@ -461,6 +509,32 @@ export function ContractCallForm({ contractId }: ContractCallFormProps) {
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {requiredAuthKeys.length > 0 && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                Required Authorization Keys
+              </p>
+              <Badge className="border-amber-300 bg-amber-200/40 text-amber-800">
+                {requiredAuthKeys.length} key
+                {requiredAuthKeys.length === 1 ? "" : "s"}
+              </Badge>
+            </div>
+            <div className="mt-3 space-y-1">
+              {requiredAuthKeys.map((key) => (
+                <p key={key} className="break-all font-mono text-xs">
+                  {key}
+                </p>
+              ))}
+            </div>
+            {isConnected && address && !isConnectedWalletAuthorized && (
+              <p className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-700">
+                Connected wallet is not authorized for this invocation.
+              </p>
+            )}
           </div>
         )}
 
