@@ -1,7 +1,9 @@
-import { Body, Controller, Param, Post, Res } from "@nestjs/common";
+import { Body, Controller, Param, Post, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
+import { RpcRateLimitGuard } from "./rpc-rate-limit.guard.js";
 import { RpcService } from "./rpc.service.js";
 
+@UseGuards(RpcRateLimitGuard)
 @Controller("rpc")
 export class RpcController {
   constructor(private readonly rpcService: RpcService) {}

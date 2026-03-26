@@ -1,7 +1,9 @@
 import {
   BadGatewayException,
   BadRequestException,
+  GatewayTimeoutException,
   Injectable,
+  PayloadTooLargeException,
   ServiceUnavailableException
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -24,6 +26,10 @@ const rpcRequestSchema = z.union([
 ]);
 
 type RpcNetwork = z.infer<typeof networkSchema>;
+
+const MAX_BATCH_REQUESTS = 25;
+const MAX_PAYLOAD_BYTES = 50_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export type ProxiedRpcResponse = {
   statusCode: number;
@@ -60,6 +66,22 @@ export class RpcService {
       });
     }
 
+    if (
+      Array.isArray(parsedPayload.data) &&
+      parsedPayload.data.length > MAX_BATCH_REQUESTS
+    ) {
+      throw new BadRequestException(
+        `RPC batch size exceeds limit of ${MAX_BATCH_REQUESTS}`
+      );
+    }
+
+    const serializedPayload = JSON.stringify(parsedPayload.data);
+    if (serializedPayload.length > MAX_PAYLOAD_BYTES) {
+      throw new PayloadTooLargeException(
+        `RPC payload exceeds limit of ${MAX_PAYLOAD_BYTES} bytes`
+      );
+    }
+
     const rpcUrl = this.getRpcUrl(parsedNetwork.data);
     if (!rpcUrl) {
       throw new ServiceUnavailableException(
@@ -67,13 +89,17 @@ export class RpcService {
       );
     }
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
     try {
       const upstreamResponse = await fetch(rpcUrl, {
         method: "POST",
         headers: {
           "content-type": "application/json"
         },
-        body: JSON.stringify(parsedPayload.data)
+        body: serializedPayload,
+        signal: controller.signal
       });
 
       const rawBody = await upstreamResponse.text();
@@ -103,7 +129,16 @@ export class RpcService {
       };
     } catch (error) {
       console.error("RPC proxy request failed", error);
+
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new GatewayTimeoutException(
+          `RPC upstream timed out after ${REQUEST_TIMEOUT_MS}ms`
+        );
+      }
+
       throw new BadGatewayException("Failed to proxy RPC request");
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }
