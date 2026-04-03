@@ -1,40 +1,26 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Param,
   Body,
+  Controller,
+  Delete,
+  Get,
   HttpCode,
   HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
 } from "@nestjs/common";
+import type { Request } from "express";
+import { OwnerKeyGuard } from "../../auth/owner-key.guard.js";
+import {
+  CreateWorkspaceDto,
+  ImportWorkspaceDto,
+  UpdateWorkspaceDto,
+} from "./workspace.dto.js";
 import { WorkspacesService } from "./workspaces.service.js";
-import { CreateWorkspaceDto, UpdateWorkspaceDto } from "./workspace.dto.js";
 
-@Controller("api/workspaces")
-export class WorkspacesController {
-  constructor(private readonly service: WorkspacesService) {}
-
-  @Get()
-  list() {
-    return this.service.list();
-  }
-
-  @Get(":id")
-  findOne(@Param("id") id: string) {
-    return this.service.findById(id);
-  }
-
-  @Post()
-  @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateWorkspaceDto) {
-    return this.service.create(dto);
-  }
-
-  @Patch(":id")
-  update(@Param("id") id: string, @Body() dto: UpdateWorkspaceDto) {
-    return this.service.update(id, dto);
-import { Controller, Get } from "@nestjs/common";
+type OwnerKeyRequest = Request & { ownerKey: string };
 
 @Controller("workspaces")
 @UseGuards(OwnerKeyGuard)
@@ -43,37 +29,47 @@ export class WorkspacesController {
 
   @Get()
   list(@Req() req: Request) {
-    return this.workspacesService.list((req as any).ownerKey);
+    return this.workspacesService.list((req as OwnerKeyRequest).ownerKey);
   }
 
   @Get(":id")
   get(@Param("id") id: string, @Req() req: Request) {
-    return this.workspacesService.get(id, (req as any).ownerKey);
+    return this.workspacesService.get(id, (req as OwnerKeyRequest).ownerKey);
   }
 
   @Post()
+  @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateWorkspaceDto, @Req() req: Request) {
-    return this.workspacesService.create((req as any).ownerKey, dto);
+    return this.workspacesService.create((req as OwnerKeyRequest).ownerKey, dto);
   }
 
-  @Put(":id")
-  update(@Param("id") id: string, @Body() dto: UpdateWorkspaceDto, @Req() req: Request) {
-    return this.workspacesService.update(id, (req as any).ownerKey, dto);
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() dto: UpdateWorkspaceDto,
+    @Req() req: Request,
+  ) {
+    return this.workspacesService.update(
+      id,
+      (req as OwnerKeyRequest).ownerKey,
+      dto,
+    );
   }
 
   @Delete(":id")
-  @HttpCode(204)
-  remove(@Param("id") id: string, @Req() req: Request) {
-    return this.workspacesService.remove(id, (req as any).ownerKey);
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param("id") id: string, @Req() req: Request) {
+    await this.workspacesService.remove(id, (req as OwnerKeyRequest).ownerKey);
   }
 
   @Post("import")
-  import(@Body() dto: ImportWorkspaceDto, @Req() req: Request) {
-    return this.workspacesService.import((req as any).ownerKey, dto);
+  @HttpCode(HttpStatus.CREATED)
+  importWorkspace(@Body() dto: ImportWorkspaceDto, @Req() req: Request) {
+    return this.workspacesService.import((req as OwnerKeyRequest).ownerKey, dto);
   }
 
   @Get(":id/export")
   export(@Param("id") id: string, @Req() req: Request) {
-    return this.workspacesService.export(id, (req as any).ownerKey);
+    return this.workspacesService.export(id, (req as OwnerKeyRequest).ownerKey);
   }
 }

@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { Injectable, NotFoundException, ForbiddenException } from "@nestjs/common";
 import { PrismaService } from "../../lib/prisma.service.js";
 import { randomBytes } from "crypto";
@@ -13,7 +14,7 @@ export class CreateShareDto {
   label?: string;
 
   @IsObject()
-  snapshotJson!: Record<string, unknown>;
+  snapshotJson!: Prisma.InputJsonValue;
 
   @IsOptional()
   @IsString()

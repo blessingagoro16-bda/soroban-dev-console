@@ -24,22 +24,22 @@ pub struct TypesTester;
 #[contractimpl]
 impl TypesTester {
     /// Test function with nested Vec<Vec<u64>>
-    pub fn test_nested_vec(env: Env, data: Vec<Vec<u64>>) -> Vec<Vec<u64>> {
+    pub fn test_nested_vec(_env: Env, data: Vec<Vec<u64>>) -> Vec<Vec<u64>> {
         data
     }
 
     /// Test function with complex nested tuples
     pub fn test_complex_tuple(
-        env: Env,
+        _env: Env,
         tuple_data: ComplexTuple,
-        count: u32,
+        _count: u32,
     ) -> ComplexTuple {
         tuple_data
     }
 
     /// Test function with BytesN<32> and Address
     pub fn test_bytes_and_address(
-        env: Env,
+        _env: Env,
         hash: BytesN<32>,
         addr: Address,
     ) -> (BytesN<32>, Address) {
@@ -48,7 +48,7 @@ impl TypesTester {
 
     /// Test function with multiple complex types combined
     pub fn test_all_types(
-        env: Env,
+        _env: Env,
         nested_vecs: Vec<Vec<u64>>,
         tuple_data: ComplexTuple,
         hash: BytesN<32>,
@@ -58,13 +58,13 @@ impl TypesTester {
     }
 
     /// Test function with Vec of complex structs
-    pub fn test_vec_of_structs(env: Env, items: Vec<ComplexTuple>) -> Vec<ComplexTuple> {
+    pub fn test_vec_of_structs(_env: Env, items: Vec<ComplexTuple>) -> Vec<ComplexTuple> {
         items
     }
 
     /// Test function with optional types
     pub fn test_optional(
-        env: Env,
+        _env: Env,
         maybe_value: Option<u64>,
         maybe_address: Option<Address>,
     ) -> (Option<u64>, Option<Address>) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, ChangeEvent } from "react";
+import { ChangeEvent, useEffect, useState } from "react";
 import {
   ArrowLeft,
   Database,
@@ -9,162 +9,155 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
+import { toast } from "sonner";
 
-import { ContractStorage } from "@/components/contract-storage";
 import { ContractCallForm } from "@/components/contract-call-form";
 import { ContractEvents } from "@/components/contract-events";
-import { TokenDashboard } from "@/components/token-dashboard";
+import { ContractStorage } from "@/components/contract-storage";
 import { ContractUpgradeModal } from "@/components/contract-upgrade-modal";
-import { useNetworkStore } from "@/store/useNetworkStore";
+import { TokenDashboard } from "@/components/token-dashboard";
 import { fetchContractOverview, type ContractOverview } from "@/lib/contract-overview";
-
-// UI
-import { Button } from "@devconsole/ui";
-import { Card, CardContent, CardHeader, CardTitle } from "@devconsole/ui";
-import { Skeleton } from "@devconsole/ui";
-import { Badge } from "@devconsole/ui";
-import { Alert, AlertDescription, AlertTitle } from "@devconsole/ui";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@devconsole/ui";
-import { useParams } from "next/navigation";
-import { Input } from "@devconsole/ui";
-import { Label } from "@devconsole/ui";
-import { toast } from "sonner";
 import { useAbiStore } from "@/store/useAbiStore";
+import { useNetworkStore } from "@/store/useNetworkStore";
 import { useWorkspaceStore } from "@/store/useWorkspaceStore";
 import {
   createNormalizedContractSpecFromFunctionNames,
   normalizeAbiJson,
   parseWasmMetadata,
 } from "@devconsole/soroban-utils";
+import { Alert, AlertDescription, AlertTitle } from "@devconsole/ui";
+import { Badge } from "@devconsole/ui";
+import { Button } from "@devconsole/ui";
+import { Card, CardContent, CardHeader, CardTitle } from "@devconsole/ui";
+import { Input } from "@devconsole/ui";
+import { Label } from "@devconsole/ui";
+import { Skeleton } from "@devconsole/ui";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@devconsole/ui";
 
 export default function ContractDetailPage() {
   const params = useParams();
   const contractId = params.contractId as string;
   const { getActiveNetworkConfig } = useNetworkStore();
-  const { setSpec } = useAbiStore();
+  const { getSpec, setSpec } = useAbiStore();
   const { activeWorkspaceId, addContractToWorkspace } = useWorkspaceStore();
+  const spec = getSpec(contractId);
 
   const [overview, setOverview] = useState<ContractOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [isUploadingInterface, setIsUploadingInterface] = useState(false);
 
   const handleInterfaceUpload = async (
-    e: ChangeEvent<HTMLInputElement>,
+    event: ChangeEvent<HTMLInputElement>,
   ): Promise<void> => {
-    const file = e.target.files?.[0];
+    const file = event.target.files?.[0];
     if (!file) return;
 
     setIsUploadingInterface(true);
 
     try {
-      const name = file.name.toLowerCase();
+      const lowerName = file.name.toLowerCase();
 
-      if (name.endsWith(".json")) {
+      if (lowerName.endsWith(".json")) {
         const text = await file.text();
-        const json = JSON.parse(text);
-        const spec = normalizeAbiJson(json);
-
-        if (!spec.functions.length) {
+        const parsed = normalizeAbiJson(JSON.parse(text));
+        if (!parsed.functions.length) {
           toast.error("No functions discovered in ABI JSON.");
           return;
         }
 
-        setSpec(contractId, { ...spec, contractId });
-
+        setSpec(contractId, { ...parsed, contractId });
         toast.success("Local ABI loaded. Interaction UI is ready.");
-      } else if (name.endsWith(".wasm")) {
+      } else if (lowerName.endsWith(".wasm")) {
         const arrayBuffer = await file.arrayBuffer();
         const functions = await parseWasmMetadata(arrayBuffer);
-
         if (!functions.length) {
           toast.error("No functions discovered in WASM metadata.");
           return;
         }
 
-        setSpec(
+        setSpec(contractId, {
+          ...createNormalizedContractSpecFromFunctionNames(
+            functions,
+            "wasm",
+            "local-wasm",
+          ),
           contractId,
-          {
-            ...createNormalizedContractSpecFromFunctionNames(
-              functions,
-              "wasm",
-              "local-wasm",
-            ),
-            contractId,
-          },
-        );
-
+        });
         toast.success("Local WASM interface loaded. Interaction UI is ready.");
       } else {
         toast.error("Unsupported file type. Please upload .json or .wasm.");
       }
-    } catch (err: any) {
-      console.error("Interface Upload Error:", err);
-      toast.error(err.message || "Failed to parse contract interface.");
+    } catch (error: any) {
+      console.error("Interface Upload Error:", error);
+      toast.error(error?.message || "Failed to parse contract interface.");
     } finally {
       setIsUploadingInterface(false);
-      // Reset input so the same file can be chosen again if needed
-      e.target.value = "";
+      event.target.value = "";
     }
   };
 
   useEffect(() => {
-    async function load() {
-      if (!contractId) return;
+    let cancelled = false;
+
+    async function loadOverview() {
+      const cleanId = decodeURIComponent(contractId).trim();
+      const network = getActiveNetworkConfig();
 
       try {
-        const network = getActiveNetworkConfig();
-        const server = new SorobanRpc.Server(network.rpcUrl);
-        const cleanId = decodeURIComponent(contractId).trim();
-        if (!StrKey.isValidContract(cleanId)) {
-          throw new Error(
-            "Invalid Contract ID format. Must be a 56-character string starting with C.",
-          );
-        }
-
-        const ledgerKey = xdr.LedgerKey.contractData(
-          new xdr.LedgerKeyContractData({
-            contract: new Address(cleanId).toScAddress(),
-            key: xdr.ScVal.scvLedgerKeyContractInstance(),
-            durability: xdr.ContractDataDurability.persistent(),
-          }),
+        const nextOverview = await fetchContractOverview(
+          cleanId,
+          network.id,
+          network.rpcUrl,
         );
 
-        const response = await server.getLedgerEntries(ledgerKey);
+        if (cancelled) return;
 
-        if (!response.entries || response.entries.length === 0) {
-          setData({ exists: false });
-        } else {
-          const entry = response.entries[0];
+        setOverview(nextOverview);
+        if (nextOverview.exists) {
           addContractToWorkspace(activeWorkspaceId, cleanId);
-          setData({
-            exists: true,
-            lastModified: entry.lastModifiedLedgerSeq,
-            ledgerSeq: entry.lastModifiedLedgerSeq,
-          });
         }
-      } catch (err: any) {
-        console.error("Contract Fetch Error:", err);
-        setError(err.message || "Failed to fetch contract data");
+      } catch (error: any) {
+        if (cancelled) return;
+
+        setOverview({
+          contractId: cleanId,
+          network: network.id,
+          rpcUrl: network.rpcUrl,
+          exists: false,
+          hasInterface: false,
+          error: error?.message || "Failed to fetch contract data",
+        });
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
-    fetchContract();
+    setLoading(true);
+    void loadOverview();
+
+    return () => {
+      cancelled = true;
+    };
   }, [contractId, getActiveNetworkConfig, activeWorkspaceId, addContractToWorkspace]);
+
+  const interfaceStatus = spec?.functions.length
+    ? "Loaded locally"
+    : overview?.hasInterface
+      ? "Detected on ledger"
+      : "Not found";
 
   return (
     <div className="container mx-auto space-y-8 p-6">
-      {/* Navigation Header */}
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div className="flex min-w-0 items-center gap-4">
-          {/* ADDED shrink-0 HERE */}
           <Link href="/contracts" className="shrink-0">
             <Button variant="outline" size="icon">
               <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
-          {/* ADDED min-w-0 HERE */}
           <div className="min-w-0">
             <h1 className="flex flex-wrap items-center gap-2 text-2xl font-bold tracking-tight">
               Contract Details
@@ -184,17 +177,14 @@ export default function ContractDetailPage() {
                 </Badge>
               )}
             </h1>
-            {/* ADDED truncate HERE instead of break-all */}
             <p className="mt-1 truncate font-mono text-sm text-muted-foreground">
               {contractId}
             </p>
           </div>
         </div>
 
-        {/* Action Buttons */}
         <div className="flex shrink-0 gap-2">
-          <ContractUpgradeModal contractId={contractId as string} />
-
+          <ContractUpgradeModal contractId={contractId} />
           <Button variant="outline" asChild>
             <a
               href={`https://stellar.expert/explorer/testnet/contract/${contractId}`}
@@ -226,11 +216,9 @@ export default function ContractDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
-          {/* Token Dashboard - appears only for SAC contracts */}
           <TokenDashboard contractId={contractId} />
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-            {/* Contract Overview Card */}
             <Card className="min-w-0 md:col-span-1">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -254,9 +242,7 @@ export default function ContractDetailPage() {
                     {overview.lastModifiedLedger && (
                       <div className="flex items-center gap-2 text-sm">
                         <Clock className="h-4 w-4 text-blue-600" />
-                        <span className="text-muted-foreground">
-                          Last Modified:
-                        </span>
+                        <span className="text-muted-foreground">Last Modified:</span>
                         <span className="font-mono text-xs">
                           Ledger #{overview.lastModifiedLedger}
                         </span>
@@ -268,20 +254,42 @@ export default function ContractDetailPage() {
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-muted-foreground">Interface:</span>
-                      <span className="font-medium">
-                        {overview.hasInterface ? "Available" : "Not found"}
-                      </span>
+                      <span className="font-medium">{interfaceStatus}</span>
+                    </div>
+                    <div className="space-y-2 border-t pt-4">
+                      <Label htmlFor="interface-upload">Load local interface</Label>
+                      <Input
+                        id="interface-upload"
+                        type="file"
+                        accept=".json,.wasm"
+                        disabled={isUploadingInterface}
+                        onChange={handleInterfaceUpload}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Upload a local ABI JSON or WASM to drive the interaction form.
+                      </p>
                     </div>
                   </>
                 ) : (
-                  <div className="text-sm text-muted-foreground">
-                    Contract not found on network
+                  <div className="space-y-3">
+                    <div className="text-sm text-muted-foreground">
+                      Contract not found on the selected network.
+                    </div>
+                    <div className="space-y-2 border-t pt-4">
+                      <Label htmlFor="interface-upload">Load local interface</Label>
+                      <Input
+                        id="interface-upload"
+                        type="file"
+                        accept=".json,.wasm"
+                        disabled={isUploadingInterface}
+                        onChange={handleInterfaceUpload}
+                      />
+                    </div>
                   </div>
                 )}
               </CardContent>
             </Card>
 
-            {/* Contract Interaction Form */}
             <div className="min-w-0 md:col-span-2">
               <ContractCallForm contractId={contractId} />
             </div>
