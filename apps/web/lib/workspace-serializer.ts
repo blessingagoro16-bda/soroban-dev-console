@@ -1,14 +1,17 @@
 /**
- * FE-012: Workspace serialization layer.
+ * FE-012 / DEVOPS-003: Workspace serialization layer.
  * Defines the versioned export/import format for workspace state.
  * Sensitive or purely ephemeral state (wallet keys, health data) is excluded.
+ *
+ * Version is sourced from schema-version.ts — the single source of truth.
  */
 
+import { SERIALIZER_VERSION, assertSupportedVersion } from "@/store/schema-version";
 import type { WorkspaceSnapshot } from "@/store/workspace-schema";
 import type { Contract } from "@/store/useContractStore";
 import type { SavedCall } from "@/store/useSavedCallsStore";
 
-export const SERIALIZER_VERSION = 1 as const;
+export { SERIALIZER_VERSION };
 
 export interface SerializedWorkspace {
   version: typeof SERIALIZER_VERSION;
@@ -38,17 +41,14 @@ export function serializeWorkspace(
 }
 
 export function deserializeWorkspace(raw: unknown): SerializedWorkspace {
-  if (
-    !raw ||
-    typeof raw !== "object" ||
-    (raw as SerializedWorkspace).version !== SERIALIZER_VERSION
-  ) {
-    throw new Error(
-      `Unsupported or invalid workspace export (expected version ${SERIALIZER_VERSION})`,
-    );
+  if (!raw || typeof raw !== "object") {
+    throw new Error("Malformed workspace export: not an object");
   }
 
   const payload = raw as SerializedWorkspace;
+
+  // Validate version — throws with recovery guidance for unsupported versions.
+  assertSupportedVersion(payload.version, "workspace-serializer");
 
   if (!payload.workspace?.id || !payload.workspace?.name) {
     throw new Error("Malformed workspace payload: missing id or name");

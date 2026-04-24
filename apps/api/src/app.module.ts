@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { HealthModule } from "./modules/health/health.module.js";
 import { RpcModule } from "./modules/rpc/rpc.module.js";
+import { RuntimeConfigModule } from "./modules/runtime-config/runtime-config.module.js";
 import { SharesModule } from "./modules/shares/shares.module.js";
 import { WorkspacesModule } from "./modules/workspaces/workspaces.module.js";
 
@@ -13,6 +14,7 @@ import { WorkspacesModule } from "./modules/workspaces/workspaces.module.js";
     }),
     HealthModule,
     RpcModule,
+    RuntimeConfigModule,
     SharesModule,
     WorkspacesModule
   ]

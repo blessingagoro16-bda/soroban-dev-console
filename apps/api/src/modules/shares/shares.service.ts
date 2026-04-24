@@ -3,6 +3,12 @@ import { Injectable, NotFoundException, ForbiddenException } from "@nestjs/commo
 import { SharesRepository } from "./shares.repository.js";
 import { WorkspacesRepository } from "../workspaces/workspaces.repository.js";
 import { MapDbErrors } from "../../lib/db-error.mapper.js";
+import { DomainEventBus } from "../../lib/domain-event-bus.js";
+import {
+  SHARE_CREATED,
+  SHARE_RESOLVED,
+  SHARE_REVOKED,
+} from "../../lib/domain-events.js";
 import { randomBytes } from "crypto";
 
 import { IsString, IsOptional, IsObject } from "class-validator";
@@ -28,6 +34,7 @@ export class SharesService {
   constructor(
     private readonly repository: SharesRepository,
     private readonly workspacesRepository: WorkspacesRepository,
+    private readonly events: DomainEventBus,
   ) {}
 
   @MapDbErrors()
@@ -39,7 +46,7 @@ export class SharesService {
 
     const token = randomBytes(24).toString("base64url");
 
-    return this.repository.create({
+    const share = await this.repository.create({
       data: {
         workspaceId: dto.workspaceId,
         token,
@@ -48,6 +55,13 @@ export class SharesService {
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       },
     });
+    this.events.emit(SHARE_CREATED, {
+      shareId: share.id,
+      workspaceId: dto.workspaceId,
+      // Emit only a hint — never log the raw token
+      tokenHint: token.slice(0, 6) + "…",
+    });
+    return share;
   }
 
   @MapDbErrors()
@@ -58,6 +72,10 @@ export class SharesService {
     if (share.expiresAt && share.expiresAt < new Date()) {
       throw new ForbiddenException("Share link has expired");
     }
+    this.events.emit(SHARE_RESOLVED, {
+      shareId: share.id,
+      workspaceId: share.workspaceId,
+    });
     return share;
   }
 
@@ -65,10 +83,15 @@ export class SharesService {
   async revoke(token: string) {
     const share = await this.repository.findUnique({ where: { token } });
     if (!share) throw new NotFoundException("Share link not found");
-    return this.repository.update({
+    const updated = await this.repository.update({
       where: { token },
       data: { revokedAt: new Date() },
     });
+    this.events.emit(SHARE_REVOKED, {
+      shareId: share.id,
+      workspaceId: share.workspaceId,
+    });
+    return updated;
   }
 
   @MapDbErrors()

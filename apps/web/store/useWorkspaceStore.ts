@@ -5,6 +5,7 @@ import type {
   WorkspaceArtifactRef,
   WorkspaceSnapshot,
 } from "./workspace-schema";
+import { STORE_SCHEMA_VERSION } from "./schema-version";
 import { workspacesApi, type CreateWorkspacePayload } from "@/lib/api/workspaces";
 
 type LegacyWorkspace = {
@@ -42,7 +43,7 @@ function createWorkspaceSnapshot(
   const now = Date.now();
 
   return {
-    version: 2,
+    version: STORE_SCHEMA_VERSION,
     id: crypto.randomUUID(),
     name,
     contractIds: [],
@@ -55,7 +56,7 @@ function createWorkspaceSnapshot(
 }
 
 const defaultWorkspace: WorkspaceSnapshot = {
-  version: 2,
+  version: STORE_SCHEMA_VERSION,
   id: "default",
   name: "Default Project",
   contractIds: [],
@@ -194,7 +195,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     }),
     {
       name: "soroban-workspaces",
-      version: 2,
+      version: STORE_SCHEMA_VERSION,
       migrate: (persistedState) => {
         const state = persistedState as
           | {

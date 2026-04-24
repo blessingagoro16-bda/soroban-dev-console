@@ -6,19 +6,30 @@ import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "sonner";
 import { CommandPalette } from "@/components/command-palette";
+import { fetchRuntimeConfig } from "@/lib/api/runtime-config";
 
 export const metadata: Metadata = {
   title: "Soroban DevConsole",
   description: "Developer toolkit for Soroban smart contracts",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const runtimeConfig = await fetchRuntimeConfig();
+
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Inline runtime config so client components can read it synchronously */}
+        <script
+          id="__runtime_config__"
+          type="application/json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(runtimeConfig) }}
+        />
+      </head>
       <body>
         <ThemeProvider
           attribute="class"

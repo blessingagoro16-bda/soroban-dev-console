@@ -6,6 +6,15 @@ import {
 } from "@nestjs/common";
 import { WorkspacesRepository } from "./workspaces.repository.js";
 import { MapDbErrors } from "../../lib/db-error.mapper.js";
+import { assertSupportedImportVersion, API_SNAPSHOT_VERSION } from "../../lib/schema-version.js";
+import { DomainEventBus } from "../../lib/domain-event-bus.js";
+import {
+  WORKSPACE_CREATED,
+  WORKSPACE_UPDATED,
+  WORKSPACE_DELETED,
+  WORKSPACE_IMPORTED,
+  WORKSPACE_EXPORTED,
+} from "../../lib/domain-events.js";
 import type {
   CreateWorkspaceDto,
   ImportWorkspaceDto,
@@ -14,7 +23,10 @@ import type {
 
 @Injectable()
 export class WorkspacesService {
-  constructor(private readonly repository: WorkspacesRepository) {}
+  constructor(
+    private readonly repository: WorkspacesRepository,
+    private readonly events: DomainEventBus,
+  ) {}
 
   @MapDbErrors()
   list(ownerKey: string) {
@@ -61,9 +73,9 @@ export class WorkspacesService {
   }
 
   @MapDbErrors()
-  create(ownerKey: string, dto: CreateWorkspaceDto) {
+  async create(ownerKey: string, dto: CreateWorkspaceDto) {
     const network = dto.selectedNetwork ?? "testnet";
-    return this.repository.create({
+    const workspace = await this.repository.create({
       data: {
         ownerKey,
         name: dto.name.trim(),
@@ -88,13 +100,20 @@ export class WorkspacesService {
           : undefined,
       },
     });
+    this.events.emit(WORKSPACE_CREATED, {
+      workspaceId: workspace.id,
+      ownerKey,
+      name: workspace.name,
+      selectedNetwork: workspace.selectedNetwork,
+    });
+    return workspace;
   }
 
   @MapDbErrors()
   async update(id: string, ownerKey: string, dto: UpdateWorkspaceDto) {
     await this.get(id, ownerKey);
 
-    return this.repository.update({
+    const workspace = await this.repository.update({
       where: { id },
       data: {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
@@ -106,19 +125,32 @@ export class WorkspacesService {
           : {}),
       },
     });
+    this.events.emit(WORKSPACE_UPDATED, {
+      workspaceId: id,
+      ownerKey,
+      changes: {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+        ...(dto.selectedNetwork !== undefined ? { selectedNetwork: dto.selectedNetwork } : {}),
+      },
+    });
+    return workspace;
   }
 
   @MapDbErrors()
   async remove(id: string, ownerKey: string) {
     await this.get(id, ownerKey);
     await this.repository.delete({ where: { id } });
+    this.events.emit(WORKSPACE_DELETED, { workspaceId: id, ownerKey });
   }
 
   @MapDbErrors()
   async import(ownerKey: string, dto: ImportWorkspaceDto) {
-    if (dto.version !== 2) {
+    try {
+      assertSupportedImportVersion(dto.version);
+    } catch (err: unknown) {
       throw new BadRequestException(
-        `Unsupported workspace version: ${dto.version}. Only version 2 is accepted.`,
+        err instanceof Error ? err.message : "Unsupported workspace version",
       );
     }
 
@@ -131,7 +163,7 @@ export class WorkspacesService {
       );
     }
 
-    return this.repository.create({
+    const workspace = await this.repository.create({
       data: {
         id: dto.id,
         ownerKey,
@@ -155,6 +187,12 @@ export class WorkspacesService {
         },
       },
     });
+    this.events.emit(WORKSPACE_IMPORTED, {
+      workspaceId: workspace.id,
+      ownerKey,
+      version: dto.version,
+    });
+    return workspace;
   }
 
   @MapDbErrors()
@@ -172,8 +210,8 @@ export class WorkspacesService {
       throw new NotFoundException("Workspace not found");
     }
 
-    return {
-      version: 2,
+    const snapshot = {
+      version: API_SNAPSHOT_VERSION,
       id: workspace.id,
       name: workspace.name,
       selectedNetwork: workspace.selectedNetwork,
@@ -186,5 +224,7 @@ export class WorkspacesService {
       createdAt: workspace.createdAt.getTime(),
       updatedAt: workspace.updatedAt.getTime(),
     };
+    this.events.emit(WORKSPACE_EXPORTED, { workspaceId: id, ownerKey });
+    return snapshot;
   }
 }

@@ -1,10 +1,11 @@
 /**
- * FE-015: Fixture contract manifest.
+ * FE-015 / DEVOPS-005: Fixture contract manifest.
  *
- * Contract IDs are read from environment variables written by
- * scripts/deploy-test-suite.sh (NEXT_PUBLIC_CONTRACT_*).
- * Switching fixture versions or networks only requires re-running
- * the deploy script — no UI files need editing.
+ * Contract IDs are served from the API via /runtime-config and embedded in
+ * the page as __runtime_config__. This file provides a typed accessor so
+ * components don't need to know the source.
+ *
+ * Falls back to env vars (NEXT_PUBLIC_CONTRACT_*) for local dev without an API.
  */
 
 export interface FixtureContract {
@@ -15,10 +16,26 @@ export interface FixtureContract {
   contractId: string | null;
 }
 
-const env = (key: string): string | null =>
-  process.env[key] ?? null;
+function readRuntimeFixtures(): FixtureContract[] | null {
+  if (typeof document === "undefined") return null;
+  try {
+    const el = document.getElementById("__runtime_config__");
+    if (!el?.textContent) return null;
+    const config = JSON.parse(el.textContent) as {
+      fixtures?: Array<{ key: string; label: string; description: string; network: string; contractId: string | null }>;
+    };
+    return (config.fixtures ?? []).map((f) => ({
+      ...f,
+      network: (f.network === "testnet" ? "testnet" : "local") as "testnet" | "local",
+    }));
+  } catch {
+    return null;
+  }
+}
 
-export const FIXTURE_CONTRACTS: FixtureContract[] = [
+const env = (key: string): string | null => process.env[key] ?? null;
+
+const STATIC_FIXTURES: FixtureContract[] = [
   {
     key: "counter",
     label: "Counter",
@@ -77,7 +94,14 @@ export const FIXTURE_CONTRACTS: FixtureContract[] = [
   },
 ];
 
+export function getFixtureContracts(): FixtureContract[] {
+  return readRuntimeFixtures() ?? STATIC_FIXTURES;
+}
+
 /** Returns only fixture contracts that have a deployed contract ID. */
 export function getDeployedFixtures(): FixtureContract[] {
-  return FIXTURE_CONTRACTS.filter((f) => f.contractId !== null);
+  return getFixtureContracts().filter((f) => f.contractId !== null);
 }
+
+/** @deprecated Use getFixtureContracts() instead */
+export const FIXTURE_CONTRACTS = STATIC_FIXTURES;
